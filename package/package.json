@@ -1,0 +1,68 @@
+{
+  "name": "@0xinsider/mcp",
+  "version": "1.2.2",
+  "description": "Official 0xinsider CLI and MCP server: Polymarket analytics for sports and esports in real-time",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "0xinsider": "dist/cli.js",
+    "0xinsider-mcp": "dist/cli.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "prebuild": "node scripts/generate-version.mjs",
+    "build": "tsc",
+    "generate:catalog": "node ../scripts/generate-mcp-catalog.mjs",
+    "catalog:parity": "node ../scripts/mcp-catalog-parity.mjs",
+    "test": "tsx --test tests/**/*.test.ts",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "polymarket",
+    "prediction-markets",
+    "trading",
+    "ai-agents",
+    "0xinsider",
+    "cli",
+    "command-line-interface",
+    "developer-tools",
+    "sports",
+    "esports",
+    "sports-analytics"
+  ],
+  "author": "0xinsider",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xinsider/0xinsider.git",
+    "directory": "mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/0xinsider/0xinsider/issues"
+  },
+  "homepage": "https://0xinsider.com/developers",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "semver": "^7.8.5",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
