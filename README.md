@@ -13,3 +13,5 @@ The formula installs the `0xinsider` and `0xinsider-mcp` commands from the offic
 - Authentication: https://0xinsider.com/auth.md
 - Documentation: https://docs.0xinsider.com
 - Go SDK: https://github.com/0xinsider/0xinsider-go
+- Node.js and TypeScript SDK: https://github.com/0xinsider/0xinsider-node
+- Rust SDK: https://github.com/0xinsider/0xinsider-rust
