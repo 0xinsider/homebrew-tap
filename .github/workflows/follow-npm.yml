@@ -1,0 +1,230 @@
+# Keeps Formula/oxinsider.rb on the npm `latest` of @0xinsider/mcp.
+#
+# Schedule and manual runs: read `latest` from the npm registry, download its
+# tarball, check it against npm's sha512 integrity, compute the sha256, and
+# rewrite the formula's url and sha256 together. The rewritten formula is then
+# audited, installed and tested on Linux and macOS. Only when every one of
+# those passes does the `land` job commit it to main. A failure at any step
+# fails the run and leaves main untouched.
+#
+# Pull requests: the same audit, install and test run on the formula exactly
+# as the PR has it, so a hand edit gets the same checks before merge.
+#
+# Credentials: the run's own GITHUB_TOKEN only. `land` is the one job that can
+# write, and it writes through the contents API with the formula's blob SHA as
+# a precondition, so a formula edited on main after `resolve` read it makes the
+# commit fail instead of overwriting the edit.
+name: Follow npm
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - Formula/**
+      - .github/workflows/follow-npm.yml
+
+permissions: {}
+
+concurrency:
+  group: follow-npm-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+env:
+  FORMULA_PATH: Formula/oxinsider.rb
+  FORMULA_NAME: 0xinsider/tap/oxinsider
+  NPM_PACKAGE: "@0xinsider/mcp"
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      verify: ${{ steps.formula.outputs.verify }}
+      land: ${{ steps.formula.outputs.land }}
+      version: ${{ steps.formula.outputs.version }}
+      previous: ${{ steps.formula.outputs.previous }}
+      formula_b64: ${{ steps.formula.outputs.formula_b64 }}
+      base_blob: ${{ steps.formula.outputs.base_blob }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the formula to verify
+        id: formula
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          current_url="$(sed -n -E 's/^  url "([^"]+)"$/\1/p' "$FORMULA_PATH")"
+          previous="$(printf '%s\n' "$current_url" | sed -n -E 's#^https://registry\.npmjs\.org/@0xinsider/mcp/-/mcp-(.+)\.tgz$#\1#p')"
+          if [ -z "$previous" ]; then
+            echo "::error file=$FORMULA_PATH::cannot read the package version from the url line: '$current_url'"
+            exit 1
+          fi
+          base_blob="$(git rev-parse "HEAD:$FORMULA_PATH")"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            {
+              echo "verify=true"
+              echo "land=false"
+              echo "version=$previous"
+              echo "previous=$previous"
+              echo "formula_b64=$(base64 -w0 "$FORMULA_PATH")"
+              echo "base_blob=$base_blob"
+            } >> "$GITHUB_OUTPUT"
+            echo "Pull request: verifying the formula as committed ($previous)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          meta="$(curl -fsSL --retry 3 "https://registry.npmjs.org/@0xinsider%2Fmcp/latest")"
+          version="$(jq -er '.version' <<<"$meta")"
+          tarball="$(jq -er '.dist.tarball' <<<"$meta")"
+          integrity="$(jq -er '.dist.integrity' <<<"$meta")"
+
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::npm latest for $NPM_PACKAGE is not a semver version: '$version'"
+            exit 1
+          fi
+          expected_url="https://registry.npmjs.org/@0xinsider/mcp/-/mcp-$version.tgz"
+          if [ "$tarball" != "$expected_url" ]; then
+            echo "::error::npm reports tarball '$tarball', expected '$expected_url'"
+            exit 1
+          fi
+
+          if [ "$version" = "$previous" ]; then
+            {
+              echo "verify=false"
+              echo "land=false"
+              echo "version=$version"
+              echo "previous=$previous"
+            } >> "$GITHUB_OUTPUT"
+            echo "The formula already installs $NPM_PACKAGE $version, the npm latest. Nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          work="$(mktemp -d)"
+          curl -fsSL --retry 3 -o "$work/package.tgz" "$tarball"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$work/package.tgz" | base64 -w0)"
+          if [ "$actual_integrity" != "$integrity" ]; then
+            echo "::error::downloaded tarball does not match npm integrity ($actual_integrity != $integrity)"
+            exit 1
+          fi
+          sha256="$(sha256sum "$work/package.tgz" | cut -d' ' -f1)"
+
+          sed -i -E \
+            -e "s#^  url \"[^\"]+\"\$#  url \"$tarball\"#" \
+            -e "s#^  sha256 \"[0-9a-f]{64}\"\$#  sha256 \"$sha256\"#" \
+            "$FORMULA_PATH"
+          grep -Fxq "  url \"$tarball\"" "$FORMULA_PATH" || { echo "::error::url line was not rewritten"; exit 1; }
+          grep -Fxq "  sha256 \"$sha256\"" "$FORMULA_PATH" || { echo "::error::sha256 line was not rewritten"; exit 1; }
+          git --no-pager diff -- "$FORMULA_PATH"
+
+          land=false
+          if [ "$REF" = "refs/heads/main" ]; then
+            land=true
+          fi
+          {
+            echo "verify=true"
+            echo "land=$land"
+            echo "version=$version"
+            echo "previous=$previous"
+            echo "formula_b64=$(base64 -w0 "$FORMULA_PATH")"
+            echo "base_blob=$base_blob"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "npm latest is $NPM_PACKAGE $version; the formula installs $previous."
+            echo
+            echo "Tarball sha256: \`$sha256\`"
+            if [ "$land" = "true" ]; then
+              echo "The formula lands on main after the checks pass."
+            else
+              echo "Not on main ($REF): the formula is verified but not committed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    needs: resolve
+    if: needs.resolve.outputs.verify == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Set up Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@c262868c096d909fc278daa87ed9772967331ea3 # 2026.11.02.1
+        with:
+          stable: true
+
+      - name: Write the formula under test
+        env:
+          REPOSITORY_PATH: ${{ steps.set-up-homebrew.outputs.repository-path }}
+          FORMULA_B64: ${{ needs.resolve.outputs.formula_b64 }}
+        run: |
+          printf '%s' "$FORMULA_B64" | base64 --decode > "$REPOSITORY_PATH/$FORMULA_PATH"
+          cat "$REPOSITORY_PATH/$FORMULA_PATH"
+
+      - name: Audit
+        run: brew audit --strict --online --formula "$FORMULA_NAME"
+
+      - name: Install
+        run: brew install --formula --build-from-source "$FORMULA_NAME"
+
+      - name: Test
+        run: brew test "$FORMULA_NAME"
+
+      - name: Check the installed version
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          installed="$(brew list --formula --versions oxinsider)"
+          if [ "$installed" != "oxinsider $VERSION" ]; then
+            echo "::error::installed '$installed', expected 'oxinsider $VERSION'"
+            exit 1
+          fi
+          echo "$installed"
+
+  land:
+    needs: [resolve, verify]
+    if: needs.resolve.outputs.land == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Commit the verified formula to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          PREVIOUS: ${{ needs.resolve.outputs.previous }}
+          FORMULA_B64: ${{ needs.resolve.outputs.formula_b64 }}
+          BASE_BLOB: ${{ needs.resolve.outputs.base_blob }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          message="chore: oxinsider $VERSION: install $NPM_PACKAGE $VERSION (was $PREVIOUS)
+
+          Audited, installed and tested on Linux and macOS in $RUN_URL"
+          commit="$(gh api --method PUT "repos/$REPOSITORY/contents/$FORMULA_PATH" \
+            -f message="$message" \
+            -f content="$FORMULA_B64" \
+            -f sha="$BASE_BLOB" \
+            -f branch=main \
+            --jq '.commit.sha')"
+          echo "Committed $commit: oxinsider $PREVIOUS -> $VERSION" | tee -a "$GITHUB_STEP_SUMMARY"

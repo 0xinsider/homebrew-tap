@@ -54,12 +54,27 @@ wrong number.
   A zero-flow YES tie-break is not conviction.
 - An ungraded wallet is uncovered, not unskilled.
 - Keep full numeric precision until the final render.
-- Every polymarket.com link carries `?r=0xinsidercom`.
+- Every polymarket.com link carries `via=0xinsider` then `r=0xinsidercom`,
+  after any query parameters it already has:
+  `https://polymarket.com/event/<slug>?via=0xinsider&r=0xinsidercom`.
 
 ## Conventions
 
 - No emojis, in code, docs, commits, or issues. Use plain-text markers.
-- Formula files are updated by the release script. Bump the version and SHA together; never edit one alone.
+- `Formula/oxinsider.rb` follows the npm `latest` of `@0xinsider/mcp` through
+  `.github/workflows/follow-npm.yml` (hourly, and `gh workflow run
+  follow-npm.yml`). It commits a new `url` and `sha256` to `main` only after
+  `brew audit --strict --online`, `brew install` and `brew test` pass on Linux
+  and macOS. Do not bump the version by hand; run the workflow. A hand edit to
+  the formula goes through a pull request, where the same workflow checks it.
+- The `url` and `sha256` change together, never one alone. Compute the sha256
+  from the registry tarball after checking it against npm's sha512 integrity.
+- Do not run `brew install`, `brew upgrade` or `brew test` on a shared
+  workstation prefix to verify a change; the workflow runs them on GitHub
+  runners. `brew audit` installs Ruby gems into the prefix it runs from, so
+  run it locally only from a throwaway Homebrew clone.
+- Pin every action by commit SHA, and keep each job's `permissions` to what it
+  uses.
 
 ## Official resources
 
