@@ -2,8 +2,8 @@
 class Oxinsider < Formula
   desc "Official CLI and MCP server for 0xinsider Polymarket sports analytics"
   homepage "https://0xinsider.com/developers"
-  url "https://registry.npmjs.org/@0xinsider/mcp/-/mcp-3.24.0.tgz"
-  sha256 "e19401bb668a5d9ab7193768b44bd010b7de41b38a39430361a7a586a0749c47"
+  url "https://registry.npmjs.org/@0xinsider/mcp/-/mcp-3.24.1.tgz"
+  sha256 "2d471bceddce4815b46568d88cc5491cdf80ef95e5fab03d1da5ae9d14ce3202"
   license "MIT"
 
   depends_on "node"
